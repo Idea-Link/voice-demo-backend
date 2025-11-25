@@ -30,7 +30,10 @@ if (!model) {
   process.exit(1);
 }
 
-const genAi = new GoogleGenAI({ apiKey: apiKey ?? '' });
+const genAi = new GoogleGenAI({ 
+  apiKey: apiKey ?? '',
+  httpOptions: { apiVersion: 'v1alpha' }
+});
 
 app.get('/health', async () => ({
   status: 'ok',

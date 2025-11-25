@@ -113,6 +113,7 @@ export class LiveSocketSession {
       this.teardown('config_error');
       return;
     }
+
     this.sessionPromise = this.ai.live.connect({
       model: process.env.GENAI_MODEL,
       config: {
@@ -126,10 +127,10 @@ export class LiveSocketSession {
           thinkingLevel: ThinkingLevel.HIGH
         },
         proactivity: {
-          proactiveAudio: false
+          proactiveAudio: true
         },
         inputAudioTranscription: {},
-        outputAudioTranscription: {}
+        outputAudioTranscription: {},
       },
       callbacks: {
         onopen: () => {
@@ -222,7 +223,7 @@ export class LiveSocketSession {
     }
 
     if (serverContent.interrupted) {
-      this.sendStatus(ConnectionState.ERROR, 'Model interrupted response');
+      this.sendStatus(ConnectionState.CONNECTED, 'Model interrupted response');
     }
   }
 
