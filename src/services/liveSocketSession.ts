@@ -16,6 +16,8 @@ import {
   LiveServerMessage,
   Modality,
   ThinkingLevel,
+  StartSensitivity,
+  EndSensitivity,
   type Blob as GenAIBlob
 } from '@google/genai';
 import { SYSTEM_INSTRUCTION } from '../constants/systemInstruction.js';
@@ -129,11 +131,19 @@ export class LiveSocketSession {
         proactivity: {
           proactiveAudio: true
         },
+        realtimeInputConfig: {
+          automaticActivityDetection: {
+            startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
+            endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
+            prefixPaddingMs: 100,
+            silenceDurationMs: 1000,
+          },
+        },
         inputAudioTranscription: {},
         outputAudioTranscription: {},
       },
       callbacks: {
-        onopen: () => {
+        onopen: async () => {
           this.logger.info({ sessionId: this.sessionId }, 'genai session opened');
           this.active = true;
           this.send({
@@ -142,6 +152,20 @@ export class LiveSocketSession {
             timestamp: Date.now()
           });
           this.sendStatus(ConnectionState.CONNECTED, 'Live session ready');
+          
+          // Trigger the model to start speaking immediately
+          try {
+            const session = await this.sessionPromise;
+            if (session && this.active) {
+              session.sendClientContent({
+                turns: [{ role: 'user', parts: [{ text: '[Call connected. Begin the conversation.]' }] }],
+                turnComplete: true
+              });
+              this.logger.info({ sessionId: this.sessionId }, 'sent initial trigger to start conversation');
+            }
+          } catch (error) {
+            this.logger.error({ err: error }, 'failed to send initial trigger');
+          }
         },
         onmessage: (event) => this.handleGenAiMessage(event),
         onerror: (event) => {
@@ -223,7 +247,13 @@ export class LiveSocketSession {
     }
 
     if (serverContent.interrupted) {
-      this.sendStatus(ConnectionState.CONNECTED, 'Model interrupted response');
+      // Send flush signal to client so it can clear its audio queue immediately
+      this.send({
+        type: SocketMessageType.SERVER_AUDIO_FLUSH,
+        payload: { reason: 'interrupted' },
+        timestamp: Date.now()
+      });
+      this.logger.info({ sessionId: this.sessionId }, 'model response interrupted, sent audio flush');
     }
   }
 

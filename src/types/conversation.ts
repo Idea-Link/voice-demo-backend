@@ -53,7 +53,8 @@ export enum SocketMessageType {
   SERVER_AUDIO_CHUNK = 'server_audio_chunk',
   SERVER_TRANSCRIPT = 'server_transcript',
   SERVER_STATUS = 'server_status',
-  SERVER_ERROR = 'server_error'
+  SERVER_ERROR = 'server_error',
+  SERVER_AUDIO_FLUSH = 'server_audio_flush'
 }
 
 export interface SocketEnvelope<
@@ -111,6 +112,15 @@ export type ServerErrorMessage = SocketEnvelope<
   ServerErrorPayload
 >;
 
+export interface ServerAudioFlushPayload {
+  reason: string;
+}
+
+export type ServerAudioFlushMessage = SocketEnvelope<
+  SocketMessageType.SERVER_AUDIO_FLUSH,
+  ServerAudioFlushPayload
+>;
+
 export type ClientSocketMessage =
   | ClientHelloMessage
   | ClientAudioChunkMessage
@@ -123,6 +133,7 @@ export type ServerSocketMessage =
   | ServerTranscriptMessage
   | ServerStatusMessage
   | ServerErrorMessage
+  | ServerAudioFlushMessage
   | HeartbeatMessage;
 
 export type AnySocketMessage = ClientSocketMessage | ServerSocketMessage;
