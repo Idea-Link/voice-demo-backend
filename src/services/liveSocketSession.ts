@@ -20,7 +20,7 @@ import {
   EndSensitivity,
   type Blob as GenAIBlob
 } from '@google/genai';
-import { SYSTEM_INSTRUCTION } from '../constants/systemInstruction.js';
+import { getSystemInstruction } from '../constants/systemInstruction.js';
 
 type LiveSession = Awaited<ReturnType<GoogleGenAI['live']['connect']>>;
 
@@ -116,11 +116,20 @@ export class LiveSocketSession {
       return;
     }
 
+    // Get the appropriate system instruction based on the app route
+    const appRoute = message.payload.appRoute;
+    const systemInstruction = getSystemInstruction(appRoute);
+    
+    this.logger.info(
+      { sessionId: this.sessionId, appRoute },
+      `Initializing session with ${appRoute === '/outbound' ? 'outbound sales' : 'default'} system prompt`
+    );
+
     this.sessionPromise = this.ai.live.connect({
       model: process.env.GENAI_MODEL,
       config: {
         responseModalities: [Modality.AUDIO],
-        systemInstruction: SYSTEM_INSTRUCTION,
+        systemInstruction: systemInstruction,
         speechConfig: {
           voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Charon' } }
         },
