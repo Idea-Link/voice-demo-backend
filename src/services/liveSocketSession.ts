@@ -21,6 +21,7 @@ import {
   type Blob as GenAIBlob
 } from '@google/genai';
 import { getSystemInstruction } from '../constants/systemInstruction.js';
+import { tokenStore } from './tokenStore.js';
 
 type LiveSession = Awaited<ReturnType<GoogleGenAI['live']['connect']>>;
 
@@ -33,18 +34,27 @@ export class LiveSocketSession {
   private active = false;
   private sessionId = randomUUID();
   private cleanedUp = false;
+  private recordingToken: string;
+
+  // Store bound handlers for cleanup
+  private boundMessageHandler: ((raw: Buffer) => void) | null = null;
+  private boundCloseHandler: (() => void) | null = null;
+  private boundErrorHandler: ((err: Error) => void) | null = null;
 
   constructor(
     private socket: WebSocket & { OPEN: number },
     private ai: GoogleGenAI,
     private logger: FastifyBaseLogger
-  ) {}
+  ) {
+    // Generate recording token for this session
+    this.recordingToken = tokenStore.generateToken(this.sessionId);
+  }
 
   public bind() {
     this.logger.info({ sessionId: this.sessionId }, 'client connected');
     this.sendStatus(ConnectionState.CONNECTING, 'Awaiting client hello');
 
-    this.socket.on('message', (raw: Buffer) => {
+    this.boundMessageHandler = (raw: Buffer) => {
       try {
         const parsed = this.parseIncoming(raw);
         this.handleIncoming(parsed);
@@ -55,18 +65,22 @@ export class LiveSocketSession {
         );
         this.sendError('bad_payload', (error as Error).message);
       }
-    });
+    };
 
-    this.socket.on('close', () => {
+    this.boundCloseHandler = () => {
       this.logger.info({ sessionId: this.sessionId }, 'socket closed by client');
       this.teardown('socket_closed');
-    });
+    };
 
-    this.socket.on('error', (err: Error) => {
+    this.boundErrorHandler = (err: Error) => {
       this.logger.error({ err }, 'socket error');
       this.sendError('socket_error', err.message);
       this.teardown('socket_error');
-    });
+    };
+
+    this.socket.on('message', this.boundMessageHandler);
+    this.socket.on('close', this.boundCloseHandler);
+    this.socket.on('error', this.boundErrorHandler);
   }
 
   private parseIncoming(raw: Buffer): ClientSocketMessage {
@@ -110,11 +124,7 @@ export class LiveSocketSession {
     if (this.sessionPromise) {
       return;
     }
-    if (!process.env.GEMINI_API_KEY || !process.env.GENAI_MODEL) {
-      this.sendError('missing_api_key', 'GEMINI_API_KEY or GENAI_MODEL is not configured');
-      this.teardown('config_error');
-      return;
-    }
+    // Note: GEMINI_API_KEY and GENAI_MODEL are validated at server startup
 
     // Get the appropriate system instruction based on the app route
     const appRoute = message.payload.appRoute;
@@ -126,7 +136,7 @@ export class LiveSocketSession {
     );
 
     this.sessionPromise = this.ai.live.connect({
-      model: process.env.GENAI_MODEL,
+      model: process.env.GENAI_MODEL!, // Validated at server startup
       config: {
         responseModalities: [Modality.AUDIO],
         systemInstruction: systemInstruction,
@@ -148,8 +158,6 @@ export class LiveSocketSession {
             silenceDurationMs: 1000,
           },
         },
-        inputAudioTranscription: {},
-        outputAudioTranscription: {},
       },
       callbacks: {
         onopen: async () => {
@@ -157,7 +165,10 @@ export class LiveSocketSession {
           this.active = true;
           this.send({
             type: SocketMessageType.SERVER_READY,
-            payload: { sessionId: this.sessionId },
+            payload: { 
+              sessionId: this.sessionId,
+              recordingToken: this.recordingToken
+            },
             timestamp: Date.now()
           });
           this.sendStatus(ConnectionState.CONNECTED, 'Live session ready');
@@ -190,6 +201,8 @@ export class LiveSocketSession {
       }
     });
 
+
+
     try {
       this.session = await this.sessionPromise;
     } catch (error) {
@@ -204,6 +217,7 @@ export class LiveSocketSession {
       this.sendError('session_not_ready', 'Session not yet initialized');
       return;
     }
+    
     const blob = this.toAudioBlob(
       message.payload.chunk,
       message.payload.sampleRate
@@ -223,32 +237,16 @@ export class LiveSocketSession {
     const { serverContent } = event;
     if (!serverContent) return;
 
-    const inputText = serverContent.inputTranscription?.text;
-    if (serverContent.turnComplete && inputText) {
-      this.send({
-        type: SocketMessageType.SERVER_TRANSCRIPT,
-        payload: { role: 'user', text: inputText, final: true },
-        timestamp: Date.now()
-      });
-    }
-
-    const outputText = serverContent.outputTranscription?.text;
-    if (serverContent.turnComplete && outputText) {
-      this.send({
-        type: SocketMessageType.SERVER_TRANSCRIPT,
-        payload: { role: 'model', text: outputText, final: true },
-        timestamp: Date.now()
-      });
-    }
-
     const base64Audio = serverContent.modelTurn?.parts?.[0]?.inlineData?.data;
     if (base64Audio) {
+      const isLastChunk = Boolean(serverContent.turnComplete);
+      
       this.send({
         type: SocketMessageType.SERVER_AUDIO_CHUNK,
         payload: {
           chunk: base64Audio,
           sampleRate: OUTPUT_SAMPLE_RATE,
-          isLastChunk: Boolean(serverContent.turnComplete)
+          isLastChunk
         },
         timestamp: Date.now(),
         seq: this.nextSeq()
@@ -310,6 +308,20 @@ export class LiveSocketSession {
     this.cleanedUp = true;
 
     this.sendStatus(ConnectionState.DISCONNECTED, reason);
+
+    // Mark connection as closed - token becomes invalid
+    tokenStore.markConnectionClosed(this.sessionId);
+
+    // Remove socket event listeners to prevent memory leaks
+    if (this.boundMessageHandler) {
+      this.socket.off('message', this.boundMessageHandler);
+    }
+    if (this.boundCloseHandler) {
+      this.socket.off('close', this.boundCloseHandler);
+    }
+    if (this.boundErrorHandler) {
+      this.socket.off('error', this.boundErrorHandler);
+    }
 
     if (this.session) {
       try {

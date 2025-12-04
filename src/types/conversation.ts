@@ -1,5 +1,3 @@
-export type ConversationRole = 'user' | 'model' | 'system';
-
 export enum ConnectionState {
   DISCONNECTED = 'DISCONNECTED',
   CONNECTING = 'CONNECTING',
@@ -21,18 +19,13 @@ export interface ClientAudioChunkPayload {
 
 export interface ServerReadyPayload {
   sessionId: string;
+  recordingToken: string;
 }
 
 export interface ServerAudioChunkPayload {
   chunk: string;
   sampleRate: number;
   isLastChunk?: boolean;
-}
-
-export interface ServerTranscriptPayload {
-  role: ConversationRole;
-  text: string;
-  final: boolean;
 }
 
 export interface ServerStatusPayload {
@@ -52,7 +45,6 @@ export enum SocketMessageType {
   HEARTBEAT = 'heartbeat',
   SERVER_READY = 'server_ready',
   SERVER_AUDIO_CHUNK = 'server_audio_chunk',
-  SERVER_TRANSCRIPT = 'server_transcript',
   SERVER_STATUS = 'server_status',
   SERVER_ERROR = 'server_error',
   SERVER_AUDIO_FLUSH = 'server_audio_flush'
@@ -98,11 +90,6 @@ export type ServerAudioChunkMessage = SocketEnvelope<
   ServerAudioChunkPayload
 >;
 
-export type ServerTranscriptMessage = SocketEnvelope<
-  SocketMessageType.SERVER_TRANSCRIPT,
-  ServerTranscriptPayload
->;
-
 export type ServerStatusMessage = SocketEnvelope<
   SocketMessageType.SERVER_STATUS,
   ServerStatusPayload
@@ -131,7 +118,6 @@ export type ClientSocketMessage =
 export type ServerSocketMessage =
   | ServerReadyMessage
   | ServerAudioChunkMessage
-  | ServerTranscriptMessage
   | ServerStatusMessage
   | ServerErrorMessage
   | ServerAudioFlushMessage

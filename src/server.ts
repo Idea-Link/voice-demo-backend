@@ -1,9 +1,14 @@
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
+import multipart from '@fastify/multipart';
+import cors from '@fastify/cors';
 import * as dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { LiveSocketSession } from './services/liveSocketSession.js';
+import { tokenStore } from './services/tokenStore.js';
 import type { WebSocket } from 'ws';
+import { mkdir, writeFile } from 'fs/promises';
+import { join } from 'path';
 
 dotenv.config();
 
@@ -16,7 +21,17 @@ const app = Fastify({
   }
 });
 
+const frontendUrl = process.env.FRONTEND_URL;
+if (!frontendUrl) {
+  app.log.warn('FRONTEND_URL is not set. CORS will reject all cross-origin requests.');
+}
+
+await app.register(cors, {
+  origin: frontendUrl ?? false,
+  credentials: true
+});
 await app.register(websocket);
+await app.register(multipart);
 
 const apiKey = process.env.GEMINI_API_KEY;
 if (!apiKey) {
@@ -43,6 +58,77 @@ app.get('/health', async () => ({
 app.get('/ws', { websocket: true }, (socket: WebSocket) => {
   const session = new LiveSocketSession(socket, genAi, app.log);
   session.bind();
+});
+
+app.post('/api/recordings', async (request, reply) => {
+  try {
+    // Validate recording token
+    const token = request.headers['x-recording-token'] as string;
+    
+    if (!token) {
+      app.log.warn('Recording upload attempted without token');
+      return reply.code(401).send({ error: 'Missing recording token' });
+    }
+
+    const tokenResult = tokenStore.validateAndUseToken(token);
+    
+    if (!tokenResult.valid) {
+      app.log.warn({ token: token.substring(0, 10) + '...' }, 'Recording upload with invalid/used/expired token');
+      return reply.code(403).send({ error: 'Invalid, expired, or already used recording token' });
+    }
+
+    const data = await request.file({
+      limits: {
+        fileSize: 100 * 1024 * 1024, // 100MB max
+      }
+    });
+    
+    if (!data) {
+      return reply.code(400).send({ error: 'No file uploaded' });
+    }
+
+    const getFieldValue = (field: any): string | undefined => {
+      if (!field) return undefined;
+      if (Array.isArray(field)) {
+        return field[0]?.value;
+      }
+      return field.value;
+    };
+
+    // Get form fields
+    const timestamp = getFieldValue(data.fields.timestamp) || new Date().toISOString();
+
+    // Ensure recordings directory exists
+    const recordingsDir = './recordings';
+    await mkdir(recordingsDir, { recursive: true });
+
+    // Generate filename with timestamp
+    const date = new Date(timestamp);
+    const dateStr = date.toISOString().replace(/[:.]/g, '-').split('.')[0];
+    const filename = `conversation-${dateStr}.webm`;
+    const filepath = join(recordingsDir, filename);
+
+    // Save the file
+    const buffer = await data.toBuffer();
+    await writeFile(filepath, buffer);
+
+    app.log.info({
+      sessionId: tokenResult.sessionId,
+      timestamp,
+      filename,
+      size: buffer.length,
+      mimetype: data.mimetype
+    }, 'Recording saved');
+
+    return reply.code(200).send({
+      success: true,
+      filename,
+      size: buffer.length
+    });
+  } catch (error) {
+    app.log.error({ err: error }, 'Failed to save recording');
+    return reply.code(500).send({ error: 'Failed to save recording' });
+  }
 });
 
 app.listen({ port: PORT, host: HOST }).catch((err) => {

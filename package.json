@@ -10,6 +10,8 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@fastify/cors": "^11.1.0",
+    "@fastify/multipart": "^9.3.0",
     "@fastify/websocket": "^11.2.0",
     "@google/genai": "^1.30.0",
     "dotenv": "^16.4.7",
