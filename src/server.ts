@@ -21,15 +21,13 @@ const app = Fastify({
   }
 });
 
-const frontendUrl = process.env.FRONTEND_URL;
-if (!frontendUrl) {
-  app.log.warn('FRONTEND_URL is not set. CORS will reject all cross-origin requests.');
+if (process.env.NODE_ENV === 'dev') {
+  await app.register(cors, {
+    origin: process.env.FRONTEND_URL ?? '*',
+    credentials: true
+  });
 }
-
-await app.register(cors, {
-  origin: frontendUrl ?? false,
-  credentials: true
-});
+  
 await app.register(websocket);
 await app.register(multipart);
 
