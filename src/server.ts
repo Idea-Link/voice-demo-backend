@@ -26,11 +26,6 @@ if (process.env.NODE_ENV === 'dev') {
     origin: process.env.FRONTEND_URL ?? '*',
     credentials: true
   });
-} else if (process.env.NODE_ENV === 'production') {
-  await app.register(cors, {
-    origin: '*',
-    credentials: true
-  });
 }
   
 await app.register(websocket);
