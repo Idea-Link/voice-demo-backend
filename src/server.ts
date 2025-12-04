@@ -28,7 +28,7 @@ if (process.env.NODE_ENV === 'dev') {
   });
 } else if (process.env.NODE_ENV === 'production') {
   await app.register(cors, {
-    origin: 'https://voicedemo.idealink.tech',
+    origin: '*',
     credentials: true
   });
 }
